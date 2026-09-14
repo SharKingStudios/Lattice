@@ -108,9 +108,28 @@ For a lightweight cached-endpoint load check after starting the API:
 API_BASE=http://127.0.0.1:8000 npm run load
 ```
 
-## Deployment and DNS
+## Production operation
 
-See [deployment instructions](docs/deployment.md). In short, clone this repository to `/opt/uga-bus` on the actual Nest host, run `sudo bash infra/install-nest.sh`, set `/etc/uga-bus/uga-bus.env`, then run the deployment script after each update. `bus.loganpeterson.org` needs an A record to the Nest server’s public IPv4 address; no IP is assumed or committed here.
+The checked-in `infra/` files are the production record: systemd runs the collector as the unprivileged `uga-bus` user, Caddy serves the built map and API from one origin, and a systemd timer creates verified, compressed SQLite backups.
+
+Initial server install (the procedure used for this deployment):
+
+```bash
+git clone REPOSITORY_URL /opt/uga-bus
+cd /opt/uga-bus
+bash infra/install-nest.sh
+sudoedit /etc/uga-bus/uga-bus.env
+```
+
+For an update, build the client locally, copy the checkout without `data/` or `.env`, then run the idempotent migration and `systemctl restart uga-bus`. The helper at `infra/deploy-nest.sh` performs this on Unix-like workstations. Check data and collector health with:
+
+```bash
+systemctl status uga-bus
+journalctl -u uga-bus -f
+sudo -u uga-bus PYTHONPATH=/opt/uga-bus/apps/api/src /opt/uga-bus/.venv/bin/python -m uga_bus.cli db-stats
+```
+
+`bus.loganpeterson.org` must resolve to the Nest server’s public IPv4 before Caddy can obtain HTTPS. The service itself can collect data before DNS/TLS is enabled.
 
 ## ETA methodology and known limits
 
