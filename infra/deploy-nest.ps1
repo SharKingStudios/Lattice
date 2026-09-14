@@ -31,12 +31,12 @@ try {
     } finally {
         Remove-Item -LiteralPath $sourceArchive, $frontendArchive -Force -ErrorAction SilentlyContinue
     }
-    ssh $remote 'cd /opt/uga-bus && sed -i "s/\r$//" infra/*.sh && chmod 0755 infra/backup.sh && /opt/uga-bus/.venv/bin/pip install -r apps/api/requirements.txt && PYTHONPATH=/opt/uga-bus/apps/api/src /opt/uga-bus/.venv/bin/python -m uga_bus.cli migrate && systemctl restart uga-bus && systemctl is-active --quiet uga-bus'
+    ssh $remote 'cd /opt/uga-bus && sed -i "s/\r$//" infra/*.sh && chmod 0755 infra/backup.sh && install -m 0644 infra/nest-proxy.Caddyfile /etc/uga-bus/nest-proxy.Caddyfile && install -m 0644 infra/uga-bus-proxy.service /etc/systemd/system/uga-bus-proxy.service && systemctl daemon-reload && /opt/uga-bus/.venv/bin/pip install -r apps/api/requirements.txt && PYTHONPATH=/opt/uga-bus/apps/api/src /opt/uga-bus/.venv/bin/python -m uga_bus.cli migrate && systemctl restart uga-bus uga-bus-proxy && systemctl is-active --quiet uga-bus uga-bus-proxy'
     # Verify independently after the restart: Windows OpenSSH can return a
     # spurious nonzero code when a long remote command emits pip output.
     Start-Sleep -Seconds 3
-    ssh $remote 'systemctl is-active --quiet uga-bus'
-    if ($LASTEXITCODE -ne 0) { throw 'UGA Bus did not become active after deployment.' }
+    ssh $remote 'systemctl is-active --quiet uga-bus uga-bus-proxy'
+    if ($LASTEXITCODE -ne 0) { throw 'UGA Bus and its Nest proxy did not become active after deployment.' }
 } finally {
     Pop-Location
 }

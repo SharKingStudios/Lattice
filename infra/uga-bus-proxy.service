@@ -1,0 +1,21 @@
+[Unit]
+Description=UGA Bus connector for Nest managed Caddy
+After=network-online.target uga-bus.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=root
+Group=root
+ExecStartPre=/usr/bin/rm -f /root/.sharkingstudios.hackclub.app.webserver.sock
+ExecStart=/usr/bin/caddy run --environ --config /etc/uga-bus/nest-proxy.Caddyfile --adapter caddyfile
+ExecStartPost=/usr/bin/chmod 0777 /root/.sharkingstudios.hackclub.app.webserver.sock
+ExecReload=/usr/bin/caddy reload --config /etc/uga-bus/nest-proxy.Caddyfile --adapter caddyfile --force
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
