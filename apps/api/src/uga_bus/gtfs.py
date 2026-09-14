@@ -149,16 +149,21 @@ def ingest_gtfs(
     session: Session, payload: bytes, source_url: str, headers: dict[str, str]
 ) -> tuple[FeedVersion, bool]:
     checksum = hashlib.sha256(payload).hexdigest()
-    existing = session.scalar(select(FeedVersion).where(FeedVersion.checksum == checksum))
-    if existing:
-        if not existing.is_active:
-            session.execute(update(FeedVersion).values(is_active=False))
-            existing.is_active = True
-        return existing, False
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         available = {name.removesuffix(".txt") for name in archive.namelist() if name.endswith(".txt")}
         table_rows = {table: rows(archive, table) for table in available}
     validation = validate_tables(table_rows)
+    row_counts = {key: len(value) for key, value in table_rows.items()}
+    existing = session.scalar(select(FeedVersion).where(FeedVersion.checksum == checksum))
+    if existing:
+        # The bytes are unchanged, but validation rules may have improved since
+        # the prior check; refresh diagnostics without replacing the feed version.
+        existing.validation_json = json_dumps(validation)
+        existing.row_counts_json = json_dumps(row_counts)
+        if not existing.is_active:
+            session.execute(update(FeedVersion).values(is_active=False))
+            existing.is_active = True
+        return existing, False
     feed_info = table_rows.get("feed_info", [{}])[0] if table_rows.get("feed_info") else {}
     all_dates = [normalize_gtfs_date(r.get("start_date")) for r in table_rows.get("calendar", [])] + [
         normalize_gtfs_date(r.get("date")) for r in table_rows.get("calendar_dates", [])
@@ -178,7 +183,7 @@ def ingest_gtfs(
         feed_version=clean(feed_info, "feed_version"),
         start_date=min(dates) if dates else None,
         end_date=max(end_dates) if end_dates else None,
-        row_counts_json=json_dumps({k: len(v) for k, v in table_rows.items()}),
+        row_counts_json=json_dumps(row_counts),
         validation_json=json_dumps(validation),
         is_active=True,
     )
