@@ -11,7 +11,7 @@ WorkingDirectory=/opt/uga-bus
 EnvironmentFile=/etc/uga-bus/uga-bus.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/uga-bus/apps/api/src
-ExecStart=/opt/uga-bus/.venv/bin/uvicorn uga_bus.app:app --host 127.0.0.1 --port 8000 --proxy-headers
+ExecStart=/opt/uga-bus/.venv/bin/uvicorn uga_bus.app:app --host 0.0.0.0 --port 8000 --proxy-headers
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
