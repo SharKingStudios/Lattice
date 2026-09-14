@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily UGA Bus database backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 America/New_York
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

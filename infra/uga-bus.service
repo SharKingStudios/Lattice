@@ -1,0 +1,24 @@
+[Unit]
+Description=UGA Bus collector and public API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=uga-bus
+Group=uga-bus
+WorkingDirectory=/opt/uga-bus
+EnvironmentFile=/etc/uga-bus/uga-bus.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/uga-bus/apps/api/src
+ExecStart=/opt/uga-bus/.venv/bin/uvicorn uga_bus.app:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ReadWritePaths=/var/lib/uga-bus
+
+[Install]
+WantedBy=multi-user.target

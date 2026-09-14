@@ -1,0 +1,16 @@
+[project]
+name = "uga-bus-api"
+version = "0.1.0"
+description = "UGA Campus Transit collector and public API"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = ["B008", "BLE001", "DTZ007", "RUF007"]

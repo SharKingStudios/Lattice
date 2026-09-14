@@ -1,0 +1,9 @@
+[Unit]
+Description=Create a consistent compressed UGA Bus SQLite backup
+
+[Service]
+Type=oneshot
+User=uga-bus
+Group=uga-bus
+EnvironmentFile=/etc/uga-bus/uga-bus.env
+ExecStart=/opt/uga-bus/infra/backup.sh

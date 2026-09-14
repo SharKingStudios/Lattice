@@ -1,0 +1,22 @@
+{
+  "name": "uga-bus",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "web:dev": "npm --workspace apps/web run dev",
+    "web:build": "npm --workspace apps/web run build",
+    "web:test": "npm --workspace apps/web run test",
+    "web:e2e": "npm --workspace apps/web run e2e",
+    "feed:smoke": "node scripts/real-feed-smoke.mjs",
+    "load": "node scripts/load-test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}
