@@ -5,7 +5,7 @@ set -euo pipefail
 : "${NEST_USER:=root}"
 
 remote="${NEST_USER}@${NEST_HOST}"
-# Build on the workstation; the Nest host only needs Python/Caddy at runtime.
+# Build on the workstation; the Nest host only needs Python at runtime.
 npm ci
 npm run web:build
 rsync -az --delete --exclude .git --exclude node_modules --exclude data --exclude .env --exclude '*.sqlite3*' ./ "$remote:/opt/uga-bus/"

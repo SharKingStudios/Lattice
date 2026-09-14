@@ -6,7 +6,7 @@ app_dir=/opt/uga-bus
 data_dir=/var/lib/uga-bus
 
 apt-get update
-apt-get install -y python3 python3-venv python3-pip sqlite3 caddy rsync
+apt-get install -y python3 python3-venv python3-pip sqlite3 rsync
 id -u uga-bus >/dev/null 2>&1 || useradd --system --home "$data_dir" --shell /usr/sbin/nologin uga-bus
 install -d -o uga-bus -g uga-bus -m 0750 "$data_dir" "$data_dir/backups"
 install -d -o root -g uga-bus -m 0750 /etc/uga-bus
@@ -19,6 +19,6 @@ PYTHONPATH="$app_dir/apps/api/src" "$app_dir/.venv/bin/python" -m uga_bus.cli mi
 install -m 0644 "$app_dir/infra/uga-bus.service" /etc/systemd/system/uga-bus.service
 install -m 0644 "$app_dir/infra/uga-bus-backup.service" /etc/systemd/system/uga-bus-backup.service
 install -m 0644 "$app_dir/infra/uga-bus-backup.timer" /etc/systemd/system/uga-bus-backup.timer
-install -m 0644 "$app_dir/infra/Caddyfile" /etc/caddy/Caddyfile
 systemctl daemon-reload
-systemctl enable --now uga-bus.service uga-bus-backup.timer caddy.service
+systemctl enable --now uga-bus.service uga-bus-backup.timer
+echo "Configure Nest's managed proxy with: nest caddy add bus.loganpeterson.org --proxy localhost:8000"
