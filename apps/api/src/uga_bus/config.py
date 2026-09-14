@@ -5,8 +5,17 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="UGA_BUS_", extra="ignore")
+    # The systemd unit exports this file already. Including it here also makes
+    # one-off operational CLI commands use the production data directory.
+    model_config = SettingsConfigDict(
+        env_file=(PROJECT_ROOT / ".env", "/etc/uga-bus/uga-bus.env"),
+        env_prefix="UGA_BUS_",
+        extra="ignore",
+    )
 
     app_name: str = "UGA Bus"
     app_version: str = "0.1.0"

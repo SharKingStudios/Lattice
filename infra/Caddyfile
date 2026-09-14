@@ -1,11 +1,11 @@
 bus.loganpeterson.org {
-    encode zstd gzip
-    reverse_proxy 127.0.0.1:8000
+\tencode zstd gzip
+\treverse_proxy 127.0.0.1:8000
 
-    header {
-        -Server
-        X-Content-Type-Options nosniff
-        Referrer-Policy strict-origin-when-cross-origin
-        Permissions-Policy "geolocation=(self)"
-    }
+\theader {
+\t\t-Server
+\t\tX-Content-Type-Options nosniff
+\t\tReferrer-Policy strict-origin-when-cross-origin
+\t\tPermissions-Policy "geolocation=(self)"
+\t}
 }

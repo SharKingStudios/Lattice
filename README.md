@@ -121,7 +121,7 @@ bash infra/install-nest.sh
 sudoedit /etc/uga-bus/uga-bus.env
 ```
 
-For an update, build the client locally, copy the checkout without `data/` or `.env`, then run the idempotent migration and `systemctl restart uga-bus`. The helper at `infra/deploy-nest.sh` performs this on Unix-like workstations. Check data and collector health with:
+For an update, build the client locally, copy the checkout without `data/` or `.env`, then run the idempotent migration and `systemctl restart uga-bus`. The helper at `infra/deploy-nest.sh` performs this on Unix-like workstations; on Windows use `infra/deploy-nest.ps1 -NestHost HOST`. Check data and collector health with:
 
 ```bash
 systemctl status uga-bus
