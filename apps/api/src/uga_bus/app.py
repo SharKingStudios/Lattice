@@ -275,6 +275,7 @@ def route_detail(route_id: str, request: Request, session: Session = Depends(get
             "shapes": shapes,
             "stops": stop_list,
             "vehicles": vehicles,
+            "arrivals": build_route_arrivals(session, feed, route_id),
             "data_fresh": fresh("vehicles"),
         },
         15,
@@ -383,53 +384,86 @@ def arrivals(
 
 
 def build_arrivals(session: Session, feed: FeedVersion, stop_id: str) -> list[dict[str, object]]:
+    return build_predictions(session, feed, stop_id=stop_id)
+
+
+def build_route_arrivals(session: Session, feed: FeedVersion, route_id: str) -> list[dict[str, object]]:
+    return build_predictions(session, feed, route_id=route_id)
+
+
+def build_predictions(
+    session: Session,
+    feed: FeedVersion,
+    *,
+    stop_id: str | None = None,
+    route_id: str | None = None,
+) -> list[dict[str, object]]:
     now = utcnow()
     candidates: list[dict[str, object]] = []
+    route_cache: dict[str, Route | None] = {}
     for update in app.state.collector.cache.trip_updates:
+        update_route_id = update.get("route_id")
+        if route_id and update_route_id != route_id:
+            continue
         for prediction in update["updates"]:
-            if prediction["stop_id"] != stop_id:
+            if stop_id and prediction["stop_id"] != stop_id:
                 continue
             passio = datetime.fromisoformat(prediction["arrival"]) if prediction["arrival"] else None
-            route = (
-                session.scalar(
-                    select(Route).where(
-                        Route.feed_version_id == feed.id, Route.route_id == update["route_id"]
+            if passio and passio <= now:
+                continue
+            if update_route_id not in route_cache:
+                route_cache[update_route_id] = (
+                    session.scalar(
+                        select(Route).where(
+                            Route.feed_version_id == feed.id, Route.route_id == update_route_id
+                        )
                     )
+                    if update_route_id
+                    else None
                 )
-                if update.get("route_id")
-                else None
-            )
-            recorded = session.scalars(
+            route = route_cache[update_route_id]
+            recorded_query = (
                 select(EtaPrediction)
                 .where(
                     EtaPrediction.trip_id == update.get("trip_id"),
-                    EtaPrediction.stop_id == stop_id,
+                    EtaPrediction.stop_id == prediction["stop_id"],
                 )
                 .order_by(EtaPrediction.observed_at.desc())
                 .limit(1)
-            ).first()
+            )
+            if update.get("vehicle_id"):
+                recorded_query = recorded_query.where(EtaPrediction.vehicle_id == update["vehicle_id"])
+            recorded = session.scalars(recorded_query).first()
             estimate = choose_eta(now=now, passio_arrival=passio)
+            reliable_local = bool(
+                recorded
+                and recorded.source == "historical_segments"
+                and recorded.estimated_arrival
+                and as_utc(recorded.estimated_arrival) > now
+            )
             candidates.append(
                 {
-                    "route_id": update.get("route_id"),
+                    "route_id": update_route_id,
                     "route": route_wire(route) if route else None,
                     "vehicle_id": update.get("vehicle_id"),
                     "trip_id": update.get("trip_id"),
-                    "stop_id": stop_id,
-                    "our_eta": as_utc(recorded.estimated_arrival) if recorded else estimate.arrival,
+                    "stop_id": prediction["stop_id"],
+                    "stop_sequence": prediction.get("stop_sequence"),
+                    "our_eta": as_utc(recorded.estimated_arrival) if reliable_local else estimate.arrival,
                     "eta_range": [as_utc(recorded.lower_arrival), as_utc(recorded.upper_arrival)]
-                    if recorded and recorded.lower_arrival
+                    if reliable_local and recorded and recorded.lower_arrival
                     else ([estimate.lower, estimate.upper] if estimate.lower else None),
-                    "confidence": recorded.confidence if recorded else estimate.confidence,
-                    "prediction_source": recorded.source if recorded else estimate.source,
+                    "confidence": recorded.confidence if reliable_local and recorded else estimate.confidence,
+                    "prediction_source": recorded.source if reliable_local and recorded else estimate.source,
                     "passio_eta": passio,
                     "scheduled_eta": None,
                     "data_age_seconds": app.state.collector.cache.health["trip_updates"].age_seconds(),
                 }
             )
-    return sorted(
+    ordered = sorted(
         candidates, key=lambda item: item["our_eta"] or item["passio_eta"] or datetime.max.replace(tzinfo=UTC)
-    )[: settings.max_arrivals_per_stop]
+    )
+    return ordered[: settings.max_arrivals_per_stop] if stop_id else ordered
 
 
 @app.get("/api/v1/alerts")

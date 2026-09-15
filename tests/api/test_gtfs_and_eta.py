@@ -26,7 +26,17 @@ def test_eta_fallback_order_is_explicit():
     )
     assert historical.source == "historical_segments"
     fallback = choose_eta(now=now, passio_arrival=now + timedelta(minutes=9))
-    assert fallback.source == "passio_fallback"
+    assert fallback.source == "passio_realtime"
+
+
+def test_realtime_eta_beats_straight_line_fallback():
+    now = datetime.now(UTC)
+    estimate = choose_eta(
+        now=now,
+        geometric_seconds=60,
+        passio_arrival=now + timedelta(minutes=9),
+    )
+    assert estimate.source == "passio_realtime"
 
 
 def test_prediction_metrics():

@@ -37,6 +37,15 @@ def choose_eta(
             "historical_segments",
             f"{len(samples)} segment samples",
         )
+    if passio_arrival and passio_arrival > now:
+        return EtaEstimate(
+            passio_arrival,
+            passio_arrival - timedelta(minutes=1),
+            passio_arrival + timedelta(minutes=1),
+            0.6,
+            "passio_realtime",
+            "upstream trip update",
+        )
     if geometric_seconds and geometric_seconds > 0:
         arrival = now + timedelta(seconds=geometric_seconds)
         margin = max(60, geometric_seconds * 0.35)
@@ -44,7 +53,7 @@ def choose_eta(
             arrival,
             arrival - timedelta(seconds=margin),
             arrival + timedelta(seconds=margin),
-            0.35,
+            0.25,
             "geometric_speed",
             "distance/speed fallback",
         )
@@ -56,15 +65,6 @@ def choose_eta(
             0.2,
             "gtfs_schedule",
             "scheduled fallback",
-        )
-    if passio_arrival and passio_arrival > now:
-        return EtaEstimate(
-            passio_arrival,
-            passio_arrival - timedelta(minutes=3),
-            passio_arrival + timedelta(minutes=4),
-            0.15,
-            "passio_fallback",
-            "insufficient local history",
         )
     return EtaEstimate(None, None, None, 0.0, "unknown", "no usable prediction")
 

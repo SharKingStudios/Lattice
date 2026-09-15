@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     vehicle_positions_url: str = "https://passio3.com/uga/passioTransit/gtfs/realtime/vehiclePositions"
     trip_updates_url: str = "https://passio3.com/uga/passioTransit/gtfs/realtime/tripUpdates"
     service_alerts_url: str = "https://passio3.com/uga/passioTransit/gtfs/realtime/serviceAlerts"
-    vehicle_poll_seconds: int = 8
-    trip_update_poll_seconds: int = 10
-    alert_poll_seconds: int = 45
+    # Realtime feeds: fresh enough for riders without polling the static GTFS more often.
+    vehicle_poll_seconds: int = 4
+    trip_update_poll_seconds: int = 5
+    alert_poll_seconds: int = 22
     static_poll_seconds: int = 3600
     request_timeout_seconds: float = 12.0
     stale_after_seconds: int = 45
