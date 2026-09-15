@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, select, tuple_
 from sqlalchemy.orm import Session
 
 from . import __version__
@@ -690,40 +690,59 @@ def evaluate_predictions(session: Session) -> dict[str, object]:
         # issuing thousands of individual historical lookups on every page visit.
         .limit(100)
     ).all()
-    for event in events:
-        for minutes in horizons:
-            cutoff = as_utc(event.arrival_at) - timedelta(minutes=minutes)
-            prediction = session.scalars(
-                select(UpstreamPrediction)
-                .where(
-                    UpstreamPrediction.trip_id == event.trip_id,
-                    UpstreamPrediction.stop_id == event.stop_id,
-                    UpstreamPrediction.predicted_arrival.is_not(None),
-                    UpstreamPrediction.observed_at <= cutoff,
-                )
-                .order_by(UpstreamPrediction.observed_at.desc())
-                .limit(1)
-            ).first()
-            uga = session.scalars(
-                select(EtaPrediction)
-                .where(
-                    EtaPrediction.trip_id == event.trip_id,
-                    EtaPrediction.stop_id == event.stop_id,
-                    EtaPrediction.source == "uga_estimation",
-                    EtaPrediction.estimated_arrival.is_not(None),
-                    EtaPrediction.observed_at <= cutoff,
-                )
-                .order_by(EtaPrediction.observed_at.desc())
-                .limit(1)
-            ).first()
-            if prediction and prediction.predicted_arrival:
-                by_horizon[str(minutes)]["passio"].append(
-                    (prediction.predicted_arrival, event.arrival_at)
-                )
-            if uga and uga.estimated_arrival:
-                by_horizon[str(minutes)]["uga_estimation"].append(
-                    (uga.estimated_arrival, event.arrival_at)
-                )
+    pairs = {(event.trip_id, event.stop_id) for event in events if event.trip_id and event.stop_id}
+    if pairs:
+        # Fetch the relevant prediction window in two indexed queries, rather
+        # than one query per event × lead time × predictor. This is important
+        # because diagnostics is a public, interactive page.
+        earliest_cutoff = min(as_utc(event.arrival_at) - timedelta(minutes=max(horizons)) for event in events)
+        latest_cutoff = max(as_utc(event.arrival_at) - timedelta(minutes=min(horizons)) for event in events)
+        upstream_by_pair: dict[tuple[str, str], list[UpstreamPrediction]] = defaultdict(list)
+        learned_by_pair: dict[tuple[str, str], list[EtaPrediction]] = defaultdict(list)
+        upstream_rows = session.scalars(
+            select(UpstreamPrediction)
+            .where(
+                tuple_(UpstreamPrediction.trip_id, UpstreamPrediction.stop_id).in_(pairs),
+                UpstreamPrediction.predicted_arrival.is_not(None),
+                UpstreamPrediction.observed_at.between(earliest_cutoff, latest_cutoff),
+            )
+            .order_by(UpstreamPrediction.observed_at)
+        ).all()
+        learned_rows = session.scalars(
+            select(EtaPrediction)
+            .where(
+                tuple_(EtaPrediction.trip_id, EtaPrediction.stop_id).in_(pairs),
+                EtaPrediction.source == "uga_estimation",
+                EtaPrediction.estimated_arrival.is_not(None),
+                EtaPrediction.observed_at.between(earliest_cutoff, latest_cutoff),
+            )
+            .order_by(EtaPrediction.observed_at)
+        ).all()
+        for prediction in upstream_rows:
+            upstream_by_pair[(prediction.trip_id, prediction.stop_id)].append(prediction)
+        for prediction in learned_rows:
+            learned_by_pair[(prediction.trip_id, prediction.stop_id)].append(prediction)
+
+        def latest_before(rows: list[UpstreamPrediction] | list[EtaPrediction], cutoff: datetime):
+            for row in reversed(rows):
+                if as_utc(row.observed_at) <= cutoff:
+                    return row
+            return None
+
+        for event in events:
+            pair = (event.trip_id, event.stop_id)
+            for minutes in horizons:
+                cutoff = as_utc(event.arrival_at) - timedelta(minutes=minutes)
+                prediction = latest_before(upstream_by_pair.get(pair, []), cutoff)
+                uga = latest_before(learned_by_pair.get(pair, []), cutoff)
+                if prediction and prediction.predicted_arrival:
+                    by_horizon[str(minutes)]["passio"].append(
+                        (prediction.predicted_arrival, event.arrival_at)
+                    )
+                if uga and uga.estimated_arrival:
+                    by_horizon[str(minutes)]["uga_estimation"].append(
+                        (uga.estimated_arrival, event.arrival_at)
+                    )
     return {
         "by_horizon_minutes": {
             horizon: {name: prediction_metrics(pairs) for name, pairs in sources.items()}
