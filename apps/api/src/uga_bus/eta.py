@@ -25,7 +25,9 @@ def choose_eta(
     passio_arrival: datetime | None = None,
 ) -> EtaEstimate:
     samples = list(segment_seconds)
-    if len(samples) >= 3:
+    # Each supplied segment already passed the configured per-segment sample
+    # threshold. A one-segment trip should therefore be eligible too.
+    if samples:
         seconds = sum(samples)
         spread = max(30, abs(seconds - median(samples) * len(samples)) * 0.2)
         arrival = now + timedelta(seconds=seconds)
@@ -35,7 +37,7 @@ def choose_eta(
             arrival + timedelta(seconds=spread),
             min(0.92, 0.45 + len(samples) / 40),
             "uga_estimation",
-            f"UGA learned timing across {len(samples)} route segments",
+            f"UGA learned timing across {len(samples)} route segment{'s' if len(samples) != 1 else ''}",
         )
     if passio_arrival and passio_arrival > now:
         return EtaEstimate(

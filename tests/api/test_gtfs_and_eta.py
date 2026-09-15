@@ -31,6 +31,12 @@ def test_eta_fallback_order_is_explicit():
     assert fallback.source == "passio_realtime"
 
 
+def test_one_well_observed_segment_is_enough_for_uga_estimation():
+    now = datetime.now(UTC)
+    estimate = choose_eta(now=now, segment_seconds=[75], passio_arrival=now + timedelta(minutes=9))
+    assert estimate.source == "uga_estimation"
+
+
 def test_realtime_eta_beats_straight_line_fallback():
     now = datetime.now(UTC)
     estimate = choose_eta(
