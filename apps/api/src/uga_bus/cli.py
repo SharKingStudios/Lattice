@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
 from datetime import timedelta
 from urllib.request import Request, urlopen
 
@@ -16,7 +15,6 @@ from .db import (
     Base,
     FeedVersion,
     RealtimeSnapshot,
-    SegmentStatistic,
     StopEvent,
     Trip,
     UpstreamPrediction,
@@ -26,6 +24,7 @@ from .db import (
     utcnow,
 )
 from .gtfs import ingest_gtfs
+from .learning import rebuild_segment_statistics
 
 
 def emit(value: object) -> None:
@@ -229,44 +228,7 @@ def command_rebuild_events(_: argparse.Namespace) -> None:
 
 
 def command_recompute_segments(_: argparse.Namespace) -> None:
-    records: defaultdict[tuple[int | None, str, str, str, str], list[float]] = defaultdict(list)
-    with session_scope() as session:
-        session.execute(delete(SegmentStatistic))
-        events = session.scalars(
-            select(StopEvent)
-            .where(StopEvent.departure_at.is_not(None))
-            .order_by(StopEvent.trip_id, StopEvent.arrival_at)
-        ).all()
-        previous_by_trip: dict[str, StopEvent] = {}
-        for event in events:
-            if not event.trip_id or not event.route_id:
-                continue
-            previous = previous_by_trip.get(event.trip_id)
-            if previous and previous.departure_at and event.arrival_at > previous.departure_at:
-                bucket = (
-                    "weekend"
-                    if event.arrival_at.astimezone().weekday() >= 5
-                    else f"weekday-{event.arrival_at.astimezone().hour // 3 * 3:02d}"
-                )
-                records[
-                    (event.feed_version_id, event.route_id, previous.stop_id, event.stop_id, bucket)
-                ].append((event.arrival_at - previous.departure_at).total_seconds())
-            previous_by_trip[event.trip_id] = event
-        for (feed_id, route_id, origin, target, bucket), values in records.items():
-            ordered = sorted(values)
-            session.add(
-                SegmentStatistic(
-                    feed_version_id=feed_id,
-                    route_id=route_id,
-                    from_stop_id=origin,
-                    to_stop_id=target,
-                    service_bucket=bucket,
-                    sample_count=len(values),
-                    mean_seconds=sum(values) / len(values),
-                    p80_seconds=ordered[min(len(ordered) - 1, int((len(ordered) - 1) * 0.8))],
-                )
-            )
-    emit({"segments": len(records), "samples": sum(len(v) for v in records.values())})
+    emit(rebuild_segment_statistics(settings.learning_timezone).__dict__)
 
 
 def command_evaluate(_: argparse.Namespace) -> None:

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from uga_bus.eta import choose_eta, prediction_metrics
 from uga_bus.gtfs import parse_gtfs_time
+from uga_bus.learning import service_bucket
 from uga_bus.matching import project_on_polyline
 
 
@@ -24,7 +25,7 @@ def test_eta_fallback_order_is_explicit():
     historical = choose_eta(
         now=now, segment_seconds=[60, 65, 55], passio_arrival=now + timedelta(minutes=9)
     )
-    assert historical.source == "historical_segments"
+    assert historical.source == "uga_estimation"
     fallback = choose_eta(now=now, passio_arrival=now + timedelta(minutes=9))
     assert fallback.source == "passio_realtime"
 
@@ -46,3 +47,9 @@ def test_prediction_metrics():
     )
     assert metrics["sample_count"] == 2
     assert metrics["mae_seconds"] == 20
+
+
+def test_learning_uses_eastern_operating_time_buckets():
+    # 16:00 UTC is noon in Athens during daylight saving time.
+    assert service_bucket(datetime(2026, 9, 14, 16, tzinfo=UTC), "America/New_York") == "weekday-12"
+    assert service_bucket(datetime(2026, 9, 13, 16, tzinfo=UTC), "America/New_York") == "weekend"

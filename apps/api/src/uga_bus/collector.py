@@ -35,6 +35,7 @@ from .db import (
 )
 from .eta import choose_eta
 from .gtfs import ingest_gtfs
+from .learning import rebuild_segment_statistics, service_bucket
 from .matching import match_confidence, project_on_polyline
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ class LiveCache:
     alerts: list[dict[str, Any]] = field(default_factory=list)
     health: dict[str, FeedHealth] = field(
         default_factory=lambda: {
-            name: FeedHealth(name) for name in ("static", "vehicles", "trip_updates", "alerts")
+            name: FeedHealth(name) for name in ("static", "vehicles", "trip_updates", "alerts", "learning")
         }
     )
     version: int = 0
@@ -113,6 +114,11 @@ class Collector:
     async def start(self) -> None:
         await self.refresh_static()
         await asyncio.gather(self.refresh_vehicles(), self.refresh_trip_updates(), self.refresh_alerts())
+        try:
+            await self.refresh_learning()
+        except Exception:
+            # A learning rebuild must never prevent live rider data from starting.
+            logger.exception("initial learning refresh failed")
         self._tasks = [
             asyncio.create_task(self._poll("static", self.settings.static_poll_seconds, self.refresh_static)),
             asyncio.create_task(
@@ -122,6 +128,9 @@ class Collector:
                 self._poll("trip_updates", self.settings.trip_update_poll_seconds, self.refresh_trip_updates)
             ),
             asyncio.create_task(self._poll("alerts", self.settings.alert_poll_seconds, self.refresh_alerts)),
+            asyncio.create_task(
+                self._poll("learning", self.settings.learning_refresh_seconds, self.refresh_learning)
+            ),
         ]
 
     async def stop(self) -> None:
@@ -216,6 +225,23 @@ class Collector:
             self.cache.alerts = parsed
             self.cache.health["alerts"].last_entities = len(parsed)
             self.cache.publish()
+
+    async def refresh_learning(self) -> None:
+        health = self.cache.health["learning"]
+        health.last_attempt = utcnow()
+        try:
+            summary = await asyncio.to_thread(
+                rebuild_segment_statistics, self.settings.learning_timezone
+            )
+        except Exception as exc:
+            health.consecutive_failures += 1
+            health.last_error = f"{type(exc).__name__}: {exc}"[:500]
+            raise
+        health.last_success = summary.refreshed_at
+        health.last_error = None
+        health.consecutive_failures = 0
+        health.last_entities = summary.usable_segments
+        self.cache.publish()
 
     def _snapshot(
         self, session: Session, feed_type: str, payload: bytes, started: datetime, ended: datetime
@@ -657,7 +683,7 @@ class Collector:
                 )
                 .order_by(StopTime.stop_sequence)
             ).all()
-            bucket = f"weekday-{now.hour // 3 * 3:02d}"
+            bucket = service_bucket(now, self.settings.learning_timezone)
             for origin, destination in zip(stop_times, stop_times[1:]):
                 statistic = session.scalar(
                     select(SegmentStatistic).where(
@@ -666,7 +692,7 @@ class Collector:
                         SegmentStatistic.from_stop_id == origin.stop_id,
                         SegmentStatistic.to_stop_id == destination.stop_id,
                         SegmentStatistic.service_bucket == bucket,
-                        SegmentStatistic.sample_count >= 3,
+                        SegmentStatistic.sample_count >= self.settings.learning_min_segment_samples,
                     )
                 )
                 if not statistic:

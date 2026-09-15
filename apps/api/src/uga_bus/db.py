@@ -255,6 +255,9 @@ class UpstreamPrediction(Base):
     delay_seconds: Mapped[int | None] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String(64), default="passio_gtfs_rt")
     raw_json: Mapped[str] = mapped_column(Text, default="{}")
+    __table_args__ = (
+        Index("ix_upstream_predictions_evaluation", "trip_id", "stop_id", "observed_at"),
+    )
 
 
 class ServiceAlert(Base):
@@ -285,6 +288,7 @@ class StopEvent(Base):
     dwell_seconds: Mapped[float | None] = mapped_column(Float)
     confidence: Mapped[float] = mapped_column(Float)
     inference_method: Mapped[str] = mapped_column(String(64))
+    __table_args__ = (Index("ix_stop_events_learning", "vehicle_id", "arrival_at"),)
 
 
 class SegmentStatistic(Base):
@@ -326,6 +330,9 @@ class EtaPrediction(Base):
     confidence: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(64))
     details_json: Mapped[str] = mapped_column(Text, default="{}")
+    __table_args__ = (
+        Index("ix_eta_predictions_evaluation", "trip_id", "stop_id", "observed_at"),
+    )
 
 
 engine = create_engine(

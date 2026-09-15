@@ -19,5 +19,7 @@ PYTHONPATH="$app_dir/apps/api/src" "$app_dir/.venv/bin/python" -m uga_bus.cli mi
 install -m 0644 "$app_dir/infra/uga-bus.service" /etc/systemd/system/uga-bus.service
 install -m 0644 "$app_dir/infra/uga-bus-backup.service" /etc/systemd/system/uga-bus-backup.service
 install -m 0644 "$app_dir/infra/uga-bus-backup.timer" /etc/systemd/system/uga-bus-backup.timer
+install -m 0644 "$app_dir/infra/uga-bus-maintenance.service" /etc/systemd/system/uga-bus-maintenance.service
+install -m 0644 "$app_dir/infra/uga-bus-maintenance.timer" /etc/systemd/system/uga-bus-maintenance.timer
 systemctl daemon-reload
-systemctl enable --now uga-bus.service uga-bus-backup.timer
+systemctl enable --now uga-bus.service uga-bus-backup.timer uga-bus-maintenance.timer

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily UGA Bus data maintenance
+
+[Timer]
+OnCalendar=*-*-* 04:07:00 America/New_York
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

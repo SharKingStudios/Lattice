@@ -34,8 +34,8 @@ def choose_eta(
             arrival - timedelta(seconds=spread),
             arrival + timedelta(seconds=spread),
             min(0.92, 0.45 + len(samples) / 40),
-            "historical_segments",
-            f"{len(samples)} segment samples",
+            "uga_estimation",
+            f"UGA learned timing across {len(samples)} route segments",
         )
     if passio_arrival and passio_arrival > now:
         return EtaEstimate(

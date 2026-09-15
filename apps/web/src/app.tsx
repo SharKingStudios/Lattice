@@ -65,15 +65,26 @@ function RiderApp() {
     refetchInterval: 12_000,
     staleTime: 0,
   })
+  const selectedRouteQuery = useQuery({
+    queryKey: ['selected-route', selectedRoute],
+    queryFn: () => api.route(selectedRoute!),
+    enabled: Boolean(selectedRoute),
+    refetchInterval: 12_000,
+    staleTime: 0,
+  })
   const lastStreamEvent = useSseRefresh()
   useEffect(() => { if (lastStreamEvent) void vehiclesQuery.refetch() }, [lastStreamEvent, vehiclesQuery])
   useEffect(() => {
     try { localStorage.setItem(RECENT_STOPS_KEY, JSON.stringify(recentStopIds)) } catch { /* Storage is optional. */ }
   }, [recentStopIds])
 
-  const chooseTab = (tab: Tab) => {
+  const chooseMainTab = (tab: Tab) => {
     setActiveTab(tab)
     setSheetExpanded(tab !== 'map')
+    setSelectedVehicle(undefined)
+    setSelectedRoute(undefined)
+    setSelectedStop(undefined)
+    setSelectedStopRoute(undefined)
   }
   const chooseStop = useCallback((stop: Stop) => {
     setSelectedStop(stop)
@@ -86,6 +97,8 @@ function RiderApp() {
   const chooseRoute = useCallback((routeId: string) => {
     if (!liveRouteIds.has(routeId)) return
     setSelectedRoute(routeId)
+    setSelectedStop(undefined)
+    setSelectedStopRoute(undefined)
     setSelectedVehicle(undefined)
     setActiveTab('routes')
     setSheetExpanded(true)
@@ -135,13 +148,13 @@ function RiderApp() {
         <div className="sheet-content">
           {activeTab === 'map' && <MapPanel busCount={vehicles.length} selectedRoute={selectedRouteRecord} selectedVehicle={selectedVehicle} nextStopName={nextStopName} onClearRoute={() => setSelectedRoute(undefined)} />}
           {activeTab === 'stops' && <StopsPanel stops={stops} routes={routes} vehicles={vehicles} selectedStop={selectedStop} selectedStopRoute={selectedStopRoute} routeDetails={routeDetailsById} arrivals={stopInfo.data?.arrivals || []} routeArrivals={selectedRouteLiveQuery.data?.arrivals || []} loadingArrivals={stopInfo.isLoading || selectedRouteLiveQuery.isFetching} location={location} recentStopIds={recentStopIds} activeRouteIds={liveRouteIds} onStop={chooseStop} onCloseStop={() => { setSelectedStop(undefined); setSelectedStopRoute(undefined) }} onRoute={(routeId) => { setSelectedStopRoute(routeId); setSelectedRoute(routeId) }} />}
-          {activeTab === 'routes' && <RoutesPanel routes={routes} routeDistances={routeDistances} liveRouteIds={liveRouteIds} selectedRoute={selectedRoute} onRoute={chooseRoute} onShowAll={() => setSelectedRoute(undefined)} />}
+          {activeTab === 'routes' && <RoutesPanel routes={routes} routeDistances={routeDistances} liveRouteIds={liveRouteIds} selectedRoute={selectedRoute} routeDetail={selectedRouteQuery.data || (selectedRoute ? routeDetailsById.get(selectedRoute) : undefined)} selectedVehicle={selectedVehicle} location={location} onStop={chooseStop} onRoute={chooseRoute} onShowAll={() => { setSelectedRoute(undefined); setSelectedVehicle(undefined) }} />}
         </div>
       </section>
       <nav className="bottom-nav" aria-label="Main navigation">
-        <button className={activeTab === 'map' ? 'is-active' : ''} onClick={() => chooseTab('map')}><span aria-hidden="true">⌖</span>Map</button>
-        <button className={activeTab === 'stops' ? 'is-active' : ''} onClick={() => chooseTab('stops')}><span aria-hidden="true">●</span>Stops</button>
-        <button className={activeTab === 'routes' ? 'is-active' : ''} onClick={() => chooseTab('routes')}><span aria-hidden="true">≋</span>Routes</button>
+        <button className={activeTab === 'map' ? 'is-active' : ''} onClick={() => chooseMainTab('map')}><span aria-hidden="true">⌖</span>Map</button>
+        <button className={activeTab === 'stops' ? 'is-active' : ''} onClick={() => chooseMainTab('stops')}><span aria-hidden="true">●</span>Stops</button>
+        <button className={activeTab === 'routes' ? 'is-active' : ''} onClick={() => chooseMainTab('routes')}><span aria-hidden="true">≋</span>Routes</button>
       </nav>
     </div>
     {routesQuery.isError && <div className="offline-card">Couldn’t load transit data. We’ll keep trying.</div>}
@@ -174,16 +187,20 @@ function StopTimeline({ stop, routes, vehicles, selectedRoute, routeDetails, arr
   const routeVehicles = vehicles.filter((vehicle) => vehicle.route_id === routeId)
   const selectedStopArrivals = arrivals.filter((arrival) => arrival.route_id === routeId)
   const timelineArrivals = routeArrivals.filter((arrival) => arrival.route_id === routeId)
-  return <div className="panel-scroll stop-timeline-panel"><div className="panel-title-row"><div><p className="eyebrow">STOP</p><h1>{stop.name}</h1></div><button className="close-panel" onClick={onClose} aria-label="Back to stops">×</button></div><div className="serving-routes">{serviceRoutes.map(({ route: candidate }) => { const eta = firstArrivalLabel(arrivals.filter((arrival) => arrival.route_id === candidate.id)); return <button key={candidate.id} className={candidate.id === routeId ? 'serving-route is-selected' : 'serving-route'} style={{ '--route-color': candidate.color } as CSSProperties} onClick={() => onRoute(candidate.id)}><i /><span>{candidate.short_name || candidate.name}</span><b>{eta || 'No estimate'}</b></button> })}</div>{loading && <p className="muted">Refreshing live arrivals…</p>}{!loading && !serviceRoutes.length && <p className="empty-state">No buses are currently serving this stop. Try again when a route is live.</p>}{route && timelineStops.length > 0 && <RouteTimeline route={route} stops={timelineStops} selectedStop={stop} vehicles={routeVehicles} arrivals={timelineArrivals.length ? timelineArrivals : selectedStopArrivals} location={location} />}</div>
+  return <div className="panel-scroll stop-timeline-panel"><div className="panel-title-row"><div><p className="eyebrow">STOP</p><h1>{stop.name}</h1></div><button className="close-panel" onClick={onClose} aria-label="Back to stops">×</button></div><div className="serving-routes">{serviceRoutes.map(({ route: candidate }) => { const eta = firstArrivalLabel(arrivals.filter((arrival) => arrival.route_id === candidate.id)); return <button key={candidate.id} className={candidate.id === routeId ? 'serving-route is-selected' : 'serving-route'} style={{ '--route-color': candidate.color } as CSSProperties} onClick={() => onRoute(candidate.id)}><i /><span>{candidate.short_name || candidate.name}</span><b>{eta || 'No estimate'}</b></button> })}</div>{loading && <p className="muted">Refreshing live arrivals…</p>}{!loading && !serviceRoutes.length && <p className="empty-state">No buses are currently serving this stop. Try again when a route is live.</p>}{route && timelineStops.length > 0 && <RouteTimeline route={route} stops={timelineStops} allStops={routeStops} selectedStop={stop} vehicles={routeVehicles} arrivals={timelineArrivals.length ? timelineArrivals : selectedStopArrivals} location={location} />}</div>
 }
 
-function RouteTimeline({ route, stops, selectedStop, vehicles, arrivals, location }: { route: Route; stops: Stop[]; selectedStop: Stop; vehicles: Vehicle[]; arrivals: Arrival[]; location?: Coordinates }) {
-  const busPositions = vehicles.map((vehicle) => ({ vehicle, index: stopIndexForVehicle(vehicle, stops) })).filter((item) => item.index >= 0)
+function RouteTimeline({ route, stops, selectedStop, vehicles, arrivals, location, allStops = stops }: { route: Route; stops: Stop[]; selectedStop?: Stop; vehicles: Vehicle[]; arrivals: Arrival[]; location?: Coordinates; allStops?: Stop[] }) {
+  const firstVisibleIndex = Math.max(0, allStops.findIndex((stop) => stop.id === stops[0]?.id))
+  const busPositions = vehicles.map((vehicle) => {
+    const routeIndex = vehicle.next_stop_id ? allStops.findIndex((stop) => stop.id === vehicle.next_stop_id) : -1
+    return { vehicle, index: routeIndex - firstVisibleIndex }
+  }).filter((item) => item.index >= 0 && item.index < stops.length)
   return <section className="route-timeline" style={{ '--route-color': route.color } as CSSProperties}>
-    <div className="timeline-heading"><span>{route.short_name || route.name}</span><small>Route stops</small></div>
+    <div className="timeline-heading"><span>{route.short_name || route.name}</span><small>UGA estimates</small></div>
     <div className="timeline-track" aria-hidden="true">{busPositions.map(({ vehicle, index }) => <span key={vehicle.id} className="timeline-bus" style={{ '--position': `${timelinePosition(index, stops.length)}%` } as CSSProperties}>▸</span>)}</div>
     <div className="timeline-stops">{stops.map((routeStop, index) => {
-      const isSelected = routeStop.id === selectedStop.id
+      const isSelected = routeStop.id === selectedStop?.id
       const arrivalLabels = arrivalLabelsForRoute(arrivals.filter((arrival) => arrival.stop_id === routeStop.id))
       const time = arrivalLabels[0]
       return <article className={isSelected ? 'timeline-stop is-selected' : 'timeline-stop'} key={`${routeStop.id}-${index}`}>
@@ -195,12 +212,20 @@ function RouteTimeline({ route, stops, selectedStop, vehicles, arrivals, locatio
   </section>
 }
 
-function RoutesPanel({ routes, routeDistances, liveRouteIds, selectedRoute, onRoute, onShowAll }: { routes: Route[]; routeDistances: Map<string, number>; liveRouteIds: Set<string>; selectedRoute?: string; onRoute: (routeId: string) => void; onShowAll: () => void }) {
+function RoutesPanel({ routes, routeDistances, liveRouteIds, selectedRoute, routeDetail, selectedVehicle, location, onStop, onRoute, onShowAll }: { routes: Route[]; routeDistances: Map<string, number>; liveRouteIds: Set<string>; selectedRoute?: string; routeDetail?: RouteDetail; selectedVehicle?: Vehicle; location: LocationState; onStop: (stop: Stop) => void; onRoute: (routeId: string) => void; onShowAll: () => void }) {
+  if (selectedRoute) return <RouteDetailPanel route={routes.find((route) => route.id === selectedRoute)} detail={routeDetail} selectedVehicle={selectedVehicle} location={location} onStop={onStop} onBack={onShowAll} />
   const active = routes.filter((route) => liveRouteIds.has(route.id)).sort((a, b) => (routeDistances.get(a.id) || Infinity) - (routeDistances.get(b.id) || Infinity))
   const nearby = active.filter((route) => (routeDistances.get(route.id) || Infinity) <= NEARBY_ROUTE_FEET)
   const farther = active.filter((route) => !nearby.includes(route))
   const inactive = routes.filter((route) => !liveRouteIds.has(route.id))
-  return <div className="panel-scroll routes-panel"><div className="panel-title-row"><div><p className="eyebrow">ROUTES</p><h1>Live bus lines</h1></div>{selectedRoute && <button className="text-button" onClick={onShowAll}>All routes</button>}</div><RouteGroup title="Nearby routes" routes={nearby} selectedRoute={selectedRoute} distances={routeDistances} onRoute={onRoute} /><RouteGroup title={nearby.length ? 'All routes' : 'Live routes'} routes={farther.length || !nearby.length ? (farther.length ? farther : active) : []} selectedRoute={selectedRoute} distances={routeDistances} onRoute={onRoute} /><RouteGroup title="Not running now" routes={inactive} selectedRoute={selectedRoute} distances={routeDistances} onRoute={onRoute} inactive /></div>
+  return <div className="panel-scroll routes-panel"><div className="panel-title-row"><div><p className="eyebrow">ROUTES</p><h1>Live bus lines</h1></div></div><RouteGroup title="Nearby routes" routes={nearby} selectedRoute={selectedRoute} distances={routeDistances} onRoute={onRoute} /><RouteGroup title={nearby.length ? 'All routes' : 'Live routes'} routes={farther.length || !nearby.length ? (farther.length ? farther : active) : []} selectedRoute={selectedRoute} distances={routeDistances} onRoute={onRoute} /><RouteGroup title="Not running now" routes={inactive} selectedRoute={selectedRoute} distances={routeDistances} onRoute={onRoute} inactive /></div>
+}
+
+function RouteDetailPanel({ route, detail, selectedVehicle, location, onStop, onBack }: { route?: Route; detail?: RouteDetail; selectedVehicle?: Vehicle; location: LocationState; onStop: (stop: Stop) => void; onBack: () => void }) {
+  if (!route || !detail) return <div className="panel-scroll routes-panel"><p className="eyebrow">ROUTE</p><h1>Loading route…</h1></div>
+  const nearby = location.coordinates ? detail.stops.map((stop) => ({ stop, feet: distanceFeet(location.coordinates!, stop) })).sort((a, b) => a.feet - b.feet).slice(0, 3) : []
+  const nextStop = selectedVehicle?.next_stop_id ? detail.stops.find((stop) => stop.id === selectedVehicle.next_stop_id)?.name : undefined
+  return <div className="panel-scroll route-detail-panel"><div className="panel-title-row"><div><p className="eyebrow">ROUTE</p><h1>{route.name}</h1></div><button className="close-panel" onClick={onBack} aria-label="Back to routes">×</button></div>{selectedVehicle && <p className="vehicle-note">Bus {selectedVehicle.vehicle_id || selectedVehicle.id}{nextStop ? ` · Next: ${nextStop}` : ''}</p>}{location.coordinates ? <section className="route-nearby"><h2 className="section-heading">Nearby stops</h2>{nearby.map(({ stop, feet }) => <button className="stop-pick" key={stop.id} onClick={() => onStop({ ...stop, routes: [route.id] })}><span className="stop-pick-dot" /><span><strong>{stop.name}</strong><small>{route.short_name || route.name}</small></span><b>{formatFeet(feet)}</b></button>)}</section> : <div className="location-card"><div><strong>Nearby stops on this route</strong><p>{location.error || 'Use your location to see the closest stops.'}</p></div><button onClick={location.request}>Use location</button></div>}<RouteTimeline route={route} stops={detail.stops} vehicles={detail.vehicles} arrivals={detail.arrivals || []} location={location.coordinates} /></div>
 }
 
 function RouteGroup({ title, routes, selectedRoute, distances, onRoute, inactive = false }: { title: string; routes: Route[]; selectedRoute?: string; distances: Map<string, number>; onRoute: (routeId: string) => void; inactive?: boolean }) {

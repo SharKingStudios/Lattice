@@ -5,7 +5,7 @@ import json
 import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,6 +25,7 @@ from .db import (
     EtaPrediction,
     FeedVersion,
     Route,
+    SegmentStatistic,
     ShapePoint,
     Stop,
     StopEvent,
@@ -437,7 +438,7 @@ def build_predictions(
             estimate = choose_eta(now=now, passio_arrival=passio)
             reliable_local = bool(
                 recorded
-                and recorded.source == "historical_segments"
+                and recorded.source == "uga_estimation"
                 and recorded.estimated_arrival
                 and as_utc(recorded.estimated_arrival) > now
             )
@@ -512,6 +513,7 @@ def diagnostics(request: Request, session: Session = Depends(get_session)) -> JS
     ):
         raise HTTPException(404, "Not found")
     feed = active_feed(session)
+    segment_statistics = session.scalars(select(SegmentStatistic)).all()
     diagnostics = {
         "feed": {
             "checksum": feed.checksum,
@@ -545,50 +547,77 @@ def diagnostics(request: Request, session: Session = Depends(get_session)) -> JS
             if settings.sqlite_path and settings.sqlite_path.exists()
             else None,
         },
+        "learning": {
+            "timezone": settings.learning_timezone,
+            "refresh_seconds": settings.learning_refresh_seconds,
+            "segment_statistics": len(segment_statistics),
+            "usable_segments": sum(
+                statistic.sample_count >= settings.learning_min_segment_samples
+                for statistic in segment_statistics
+            ),
+            "segment_samples": sum(statistic.sample_count for statistic in segment_statistics),
+            "last_refresh": app.state.collector.cache.health["learning"].last_success,
+            "last_error": app.state.collector.cache.health["learning"].last_error,
+        },
         "evaluation": evaluate_predictions(session),
     }
     return cached_json(request, diagnostics, 10)
 
 
 def evaluate_predictions(session: Session) -> dict[str, object]:
-    # Join predictions to inferred ground truth on trip/stop; the closest later observation is used once.
-    pairs: dict[str, list[tuple[datetime, datetime]]] = {"passio": [], "ours": []}
+    # Measure forecasts at the same lead time. Comparing the final update immediately
+    # before a bus reaches a stop would make every system look artificially accurate.
+    horizons = (2, 5, 10, 20)
+    by_horizon: dict[str, dict[str, list[tuple[datetime, datetime]]]] = {
+        str(minutes): {"passio": [], "uga_estimation": []} for minutes in horizons
+    }
     events = session.scalars(
-        select(StopEvent).where(StopEvent.confidence >= 0.5).order_by(StopEvent.arrival_at.desc()).limit(3000)
+        select(StopEvent)
+        .where(StopEvent.confidence >= 0.5, StopEvent.trip_id.is_not(None))
+        .order_by(StopEvent.arrival_at.desc())
+        .limit(500)
     ).all()
     for event in events:
-        if not event.trip_id:
-            continue
-        prediction = session.scalars(
-            select(UpstreamPrediction)
-            .where(
-                UpstreamPrediction.trip_id == event.trip_id,
-                UpstreamPrediction.stop_id == event.stop_id,
-                UpstreamPrediction.predicted_arrival.is_not(None),
-                UpstreamPrediction.observed_at <= event.arrival_at,
-            )
-            .order_by(UpstreamPrediction.observed_at.desc())
-            .limit(1)
-        ).first()
-        ours = session.scalars(
-            select(EtaPrediction)
-            .where(
-                EtaPrediction.trip_id == event.trip_id,
-                EtaPrediction.stop_id == event.stop_id,
-                EtaPrediction.estimated_arrival.is_not(None),
-                EtaPrediction.observed_at <= event.arrival_at,
-            )
-            .order_by(EtaPrediction.observed_at.desc())
-            .limit(1)
-        ).first()
-        if prediction and prediction.predicted_arrival:
-            pairs["passio"].append((prediction.predicted_arrival, event.arrival_at))
-        if ours and ours.estimated_arrival:
-            pairs["ours"].append((ours.estimated_arrival, event.arrival_at))
+        for minutes in horizons:
+            cutoff = as_utc(event.arrival_at) - timedelta(minutes=minutes)
+            prediction = session.scalars(
+                select(UpstreamPrediction)
+                .where(
+                    UpstreamPrediction.trip_id == event.trip_id,
+                    UpstreamPrediction.stop_id == event.stop_id,
+                    UpstreamPrediction.predicted_arrival.is_not(None),
+                    UpstreamPrediction.observed_at <= cutoff,
+                )
+                .order_by(UpstreamPrediction.observed_at.desc())
+                .limit(1)
+            ).first()
+            uga = session.scalars(
+                select(EtaPrediction)
+                .where(
+                    EtaPrediction.trip_id == event.trip_id,
+                    EtaPrediction.stop_id == event.stop_id,
+                    EtaPrediction.source == "uga_estimation",
+                    EtaPrediction.estimated_arrival.is_not(None),
+                    EtaPrediction.observed_at <= cutoff,
+                )
+                .order_by(EtaPrediction.observed_at.desc())
+                .limit(1)
+            ).first()
+            if prediction and prediction.predicted_arrival:
+                by_horizon[str(minutes)]["passio"].append(
+                    (prediction.predicted_arrival, event.arrival_at)
+                )
+            if uga and uga.estimated_arrival:
+                by_horizon[str(minutes)]["uga_estimation"].append(
+                    (uga.estimated_arrival, event.arrival_at)
+                )
     return {
-        "passio": prediction_metrics(pairs["passio"]),
-        "ours": prediction_metrics(pairs["ours"]),
-        "note": "Metrics require inferred stop-event ground truth and are not a claim of superiority.",
+        "by_horizon_minutes": {
+            horizon: {name: prediction_metrics(pairs) for name, pairs in sources.items()}
+            for horizon, sources in by_horizon.items()
+        },
+        "event_sample": len(events),
+        "note": "Each forecast is compared with an inferred arrival at the same lead time; low-confidence arrivals are excluded.",
     }
 
 

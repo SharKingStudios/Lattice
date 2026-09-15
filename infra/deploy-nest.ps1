@@ -31,7 +31,7 @@ try {
     } finally {
         Remove-Item -LiteralPath $sourceArchive, $frontendArchive -Force -ErrorAction SilentlyContinue
     }
-    ssh $remote 'cd /opt/uga-bus && sed -i "s/\r$//" infra/*.sh && chmod 0755 infra/backup.sh && /opt/uga-bus/.venv/bin/pip install -r apps/api/requirements.txt && PYTHONPATH=/opt/uga-bus/apps/api/src /opt/uga-bus/.venv/bin/python -m uga_bus.cli migrate && systemctl restart uga-bus && systemctl is-active --quiet uga-bus'
+    ssh $remote 'cd /opt/uga-bus && sed -i "s/\r$//" infra/*.sh && chmod 0755 infra/backup.sh && /opt/uga-bus/.venv/bin/pip install -r apps/api/requirements.txt && PYTHONPATH=/opt/uga-bus/apps/api/src /opt/uga-bus/.venv/bin/python -m uga_bus.cli migrate && install -m 0644 infra/uga-bus-maintenance.service /etc/systemd/system/uga-bus-maintenance.service && install -m 0644 infra/uga-bus-maintenance.timer /etc/systemd/system/uga-bus-maintenance.timer && systemctl daemon-reload && systemctl enable --now uga-bus-maintenance.timer && systemctl restart uga-bus && systemctl is-active --quiet uga-bus'
     # Verify independently after the restart: Windows OpenSSH can return a
     # spurious nonzero code when a long remote command emits pip output.
     Start-Sleep -Seconds 3

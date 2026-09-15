@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     trip_update_poll_seconds: int = 5
     alert_poll_seconds: int = 22
     static_poll_seconds: int = 3600
+    learning_refresh_seconds: int = 300
+    learning_timezone: str = "America/New_York"
+    learning_min_segment_samples: int = 3
     request_timeout_seconds: float = 12.0
     stale_after_seconds: int = 45
     detailed_observation_retention_days: int = 180
