@@ -685,7 +685,10 @@ def evaluate_predictions(session: Session) -> dict[str, object]:
         select(StopEvent)
         .where(StopEvent.confidence >= 0.5, StopEvent.trip_id.is_not(None))
         .order_by(StopEvent.arrival_at.desc())
-        .limit(500)
+        # A diagnostics page should be useful interactively. One hundred recent,
+        # high-confidence arrivals gives each horizon a meaningful sample without
+        # issuing thousands of individual historical lookups on every page visit.
+        .limit(100)
     ).all()
     for event in events:
         for minutes in horizons:
