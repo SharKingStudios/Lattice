@@ -10,18 +10,7 @@ This repository contains the complete first-pass service, UI, test suite, real-f
 
 ## Architecture
 
-```text
- official Passio static GTFS / GTFS-RT
-                 │  (one responsible server-side poller per feed)
-                 ▼
-  Collector → validation/versioned GTFS + SQLite history → in-memory live cache
-                 │                         │                    │
-                 │                         └── matching, stop events, ETA evaluation
-                 ▼                                              ▼
-         /api/v1 REST + SSE  ─────────────────────────────→ browser map clients
-```
-
-The browser never contacts `passio3.com`. Vehicle positions default to an 8-second server poll, trip updates to 10 seconds, alerts to 45 seconds, and static GTFS to one hour. Each failed upstream request backs off exponentially (up to five minutes), while the last known data remains visible with a stale warning.
+The browser never contacts `passio3.com`. Vehicle positions default to a 4-second server poll, trip updates to 5 seconds, alerts to 22 seconds, and static GTFS to one hour. Each failed upstream request backs off exponentially (up to five minutes), while the last known data remains visible with a stale warning.
 
 ## Sources
 
@@ -110,7 +99,7 @@ API_BASE=http://127.0.0.1:8000 npm run load
 
 ## Production operation
 
-The checked-in `infra/` files are the production record: systemd runs the collector as the unprivileged `uga-bus` user, Caddy serves the built map and API from one origin, and a systemd timer creates verified, compressed SQLite backups.
+The checked-in `infra/` files are the production record: systemd runs the collector as the unprivileged `uga-bus` user, Nest's Dashboard reverse proxy serves the built map and API from one origin, and a systemd timer creates verified, compressed SQLite backups.
 
 Initial server install (the procedure used for this deployment):
 
@@ -129,7 +118,7 @@ journalctl -u uga-bus -f
 sudo -u uga-bus PYTHONPATH=/opt/uga-bus/apps/api/src /opt/uga-bus/.venv/bin/python -m uga_bus.cli db-stats
 ```
 
-`bus.loganpeterson.org` must resolve to the Nest server’s public IPv4 before Caddy can obtain HTTPS. The service itself can collect data before DNS/TLS is enabled.
+In the Nest Dashboard's Domains tab, add `sharkingstudios.hackclub.app` and `bus.loganpeterson.org` with target port `8000`. Make `bus.loganpeterson.org` a CNAME to `sharkingstudios.hackclub.app`—not an A record to a Nest IP—and disable any DNS proxy. The service itself can collect data before the public route is enabled.
 
 ## ETA methodology and known limits
 
