@@ -3,7 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from uga_bus.eta import choose_eta, prediction_metrics
 from uga_bus.gtfs import parse_gtfs_time
-from uga_bus.learning import service_bucket
+from uga_bus.learning import _valid_segment, service_bucket
+from uga_bus.db import StopEvent
 from uga_bus.matching import project_on_polyline
 
 
@@ -53,3 +54,16 @@ def test_learning_uses_eastern_operating_time_buckets():
     # 16:00 UTC is noon in Athens during daylight saving time.
     assert service_bucket(datetime(2026, 9, 14, 16, tzinfo=UTC), "America/New_York") == "weekday-12"
     assert service_bucket(datetime(2026, 9, 13, 16, tzinfo=UTC), "America/New_York") == "weekend"
+
+
+def test_learning_uses_arrival_to_arrival_time_when_departures_are_missing():
+    started = datetime(2026, 9, 14, 16, tzinfo=UTC)
+    previous = StopEvent(
+        vehicle_id="bus-1", route_id="orbit", stop_id="a", stop_sequence=4,
+        arrival_at=started, confidence=0.8, inference_method="test",
+    )
+    current = StopEvent(
+        vehicle_id="bus-1", route_id="orbit", stop_id="b", stop_sequence=5,
+        arrival_at=started + timedelta(seconds=95), confidence=0.8, inference_method="test",
+    )
+    assert _valid_segment(previous, current) == 95

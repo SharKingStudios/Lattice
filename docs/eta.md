@@ -10,7 +10,7 @@ A single nearby GPS point is not an arrival. The collector needs two recent, low
 
 ## UGA estimation
 
-UGA estimation is the local, rider-facing ETA model. It learns travel time for each route segment from high-confidence observed departures and arrivals. Weekdays are grouped into local Athens three-hour operating windows; weekends use their own bucket.
+UGA estimation is the local, rider-facing ETA model. It learns arrival-to-arrival travel time for each route segment from high-confidence observed stop events. That includes typical dwell at the origin stop, which is useful to riders waiting for a bus that may not have cleared it yet. Weekdays are grouped into local Athens three-hour operating windows; weekends use their own bucket.
 
 Every five minutes, the collector rebuilds segment statistics from retained replayable stop events. A segment is used only after at least three observations, and an ETA uses local timing only when every remaining segment to that stop has sufficient history. This is deliberately conservative: a partial local model must not make a rider-facing prediction worse.
 

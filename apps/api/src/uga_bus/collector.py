@@ -341,6 +341,10 @@ class Collector:
                         **match,
                     )
                     session.add(observation)
+                    # Assign an ID before the previous-observation lookup. Without
+                    # this flush, an autoflush can make this observation its own
+                    # predecessor and prevent a departure from being recorded.
+                    session.flush()
                     self._infer_stop_event(session, active, observation)
                     output.append({**record, "timestamp": record["timestamp"].isoformat(), **match})
                     parsed += 1

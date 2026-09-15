@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
 
-from .db import SegmentStatistic, StopEvent, as_utc, session_scope, utcnow
+from .db import FeedVersion, SegmentStatistic, StopEvent, as_utc, session_scope, utcnow
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,6 @@ def _valid_segment(previous: StopEvent, current: StopEvent) -> float | None:
         or previous.vehicle_id != current.vehicle_id
         or not previous.route_id
         or previous.route_id != current.route_id
-        or previous.feed_version_id != current.feed_version_id
-        or previous.departure_at is None
         or previous.stop_sequence is None
         or current.stop_sequence is None
         or current.stop_sequence <= previous.stop_sequence
@@ -41,7 +39,9 @@ def _valid_segment(previous: StopEvent, current: StopEvent) -> float | None:
         or current.confidence < 0.5
     ):
         return None
-    seconds = (as_utc(current.arrival_at) - as_utc(previous.departure_at)).total_seconds()
+    # Arrival-to-arrival timing includes the usual dwell at the origin, which
+    # is useful when a rider's bus has not yet cleared that stop.
+    seconds = (as_utc(current.arrival_at) - as_utc(previous.arrival_at)).total_seconds()
     # Reject duplicated observations, layovers, and implausible cross-route jumps.
     return seconds if 8 <= seconds <= 1_800 else None
 
@@ -55,6 +55,7 @@ def rebuild_segment_statistics(timezone_name: str) -> LearningSummary:
     """
     records: defaultdict[tuple[int | None, str, str, str, str], list[float]] = defaultdict(list)
     with session_scope() as session:
+        active_feed = session.scalar(select(FeedVersion).where(FeedVersion.is_active.is_(True)))
         events = session.scalars(
             select(StopEvent)
             .where(StopEvent.confidence >= 0.5)
@@ -70,7 +71,7 @@ def rebuild_segment_statistics(timezone_name: str) -> LearningSummary:
                 if seconds is not None and event.route_id:
                     records[
                         (
-                            event.feed_version_id,
+                            active_feed.id if active_feed else event.feed_version_id,
                             event.route_id,
                             previous.stop_id,
                             event.stop_id,
