@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import logging
+import shutil
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -13,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
@@ -512,9 +514,29 @@ def diagnostics(request: Request, session: Session = Depends(get_session)) -> JS
         and request.headers.get("Authorization") != f"Bearer {settings.diagnostics_token}"
     ):
         raise HTTPException(404, "Not found")
+    return cached_json(request, diagnostics_payload(session), 10)
+
+
+@app.get("/diagnostics", include_in_schema=False)
+def public_diagnostics(session: Session = Depends(get_session)) -> HTMLResponse:
+    """A small, direct server page that remains available without SPA routing."""
+    return HTMLResponse(
+        diagnostics_html(diagnostics_payload(session)),
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+def diagnostics_payload(session: Session) -> dict[str, object]:
     feed = active_feed(session)
     segment_statistics = session.scalars(select(SegmentStatistic)).all()
-    diagnostics = {
+    data_dir = settings.data_dir.resolve()
+    disk = shutil.disk_usage(data_dir)
+    database_bytes = (
+        settings.sqlite_path.stat().st_size
+        if settings.sqlite_path and settings.sqlite_path.exists()
+        else None
+    )
+    return {
         "feed": {
             "checksum": feed.checksum,
             "version": feed.feed_version,
@@ -543,9 +565,7 @@ def diagnostics(request: Request, session: Session = Depends(get_session)) -> JS
             "unmatched_vehicles": sum(
                 1 for vehicle in app.state.collector.cache.vehicles.values() if not vehicle.get("trip_id")
             ),
-            "database_bytes": settings.sqlite_path.stat().st_size
-            if settings.sqlite_path and settings.sqlite_path.exists()
-            else None,
+            "database_bytes": database_bytes,
         },
         "learning": {
             "timezone": settings.learning_timezone,
@@ -560,8 +580,98 @@ def diagnostics(request: Request, session: Session = Depends(get_session)) -> JS
             "last_error": app.state.collector.cache.health["learning"].last_error,
         },
         "evaluation": evaluate_predictions(session),
+        "system": {
+            "process_memory_bytes": process_memory_bytes(),
+            "data_directory_bytes": directory_size(data_dir),
+            "database_bytes": database_bytes,
+            "disk_total_bytes": disk.total,
+            "disk_used_bytes": disk.used,
+            "disk_free_bytes": disk.free,
+        },
     }
-    return cached_json(request, diagnostics, 10)
+
+
+def process_memory_bytes() -> int | None:
+    """Resident memory is Linux-specific; return None cleanly on local development hosts."""
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def directory_size(directory: Path) -> int:
+    try:
+        return sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+    except OSError:
+        return 0
+
+
+def diagnostics_html(payload: dict[str, object]) -> str:
+    def value(item: object) -> str:
+        if item is None:
+            return "—"
+        if isinstance(item, datetime):
+            return item.astimezone(UTC).isoformat()
+        if isinstance(item, bool):
+            return "yes" if item else "no"
+        if isinstance(item, (dict, list)):
+            return html.escape(json.dumps(jsonable_encoder(item), separators=(",", ":")))
+        return html.escape(str(item))
+
+    def bytes_value(item: object) -> str:
+        if not isinstance(item, (int, float)):
+            return value(item)
+        units = ("B", "KiB", "MiB", "GiB", "TiB")
+        amount = float(item)
+        for unit in units:
+            if amount < 1024 or unit == units[-1]:
+                return f"{amount:.1f} {unit}"
+            amount /= 1024
+        return str(item)
+
+    def minutes_value(item: object) -> str:
+        if not isinstance(item, (int, float)):
+            return value(item)
+        return f"{item / 60:.1f} min"
+
+    def rows(values: dict[str, object], byte_keys: set[str] = set()) -> str:
+        return "".join(
+            f"<tr><th>{html.escape(key.replace('_', ' '))}</th><td>{bytes_value(item) if key in byte_keys else value(item)}</td></tr>"
+            for key, item in values.items()
+        )
+
+    system = payload["system"]
+    latest = payload["latest"]
+    learning = payload["learning"]
+    evaluation = payload["evaluation"]
+    assert isinstance(system, dict) and isinstance(latest, dict) and isinstance(learning, dict) and isinstance(evaluation, dict)
+    accuracy_rows = []
+    horizons = evaluation.get("by_horizon_minutes", {})
+    assert isinstance(horizons, dict)
+    for horizon, sources in horizons.items():
+        assert isinstance(sources, dict)
+        for source, metric in sources.items():
+            assert isinstance(metric, dict)
+            accuracy_rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(horizon))} min</td>"
+                f"<td>{'UGA live estimate' if source == 'passio' else 'Lattice learned estimate'}</td>"
+                f"<td>{value(metric.get('sample_count'))}</td>"
+                f"<td>{minutes_value(metric.get('mae_seconds'))}</td>"
+                f"<td>{minutes_value(metric.get('median_absolute_error_seconds'))}</td>"
+                f"<td>{minutes_value(metric.get('p90_absolute_error_seconds'))}</td>"
+                f"<td>{minutes_value(metric.get('bias_seconds'))}</td>"
+                "</tr>"
+            )
+    upstream = payload["upstream"]
+    assert isinstance(upstream, dict)
+    upstream_rows = "".join(
+        f"<tr><th>{html.escape(str(name))}</th><td>{value(status)}</td></tr>" for name, status in upstream.items()
+    )
+    return f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>UGA Bus diagnostics</title><style>body{{margin:24px;max-width:1000px;font:14px/1.45 system-ui,sans-serif;color:#201b17;background:#fffdf9}}h1{{margin-bottom:4px}}h2{{margin-top:28px}}p{{color:#655b52}}table{{width:100%;border-collapse:collapse;margin:8px 0 18px}}th,td{{padding:7px 9px;border:1px solid #ddd4ca;text-align:left;vertical-align:top}}th{{background:#f5efe7;font-weight:700}}td{{word-break:break-word}}.accuracy td:nth-child(n+3){{text-align:right}}code{{font-family:ui-monospace,monospace}}</style></head><body><h1>UGA Bus server diagnostics</h1><p>Generated {datetime.now(UTC).isoformat()} · <a href=\"/\">Rider map</a> · <a href=\"/api/v1/diagnostics\">JSON</a></p><h2>Server resources</h2><table>{rows(system, {'process_memory_bytes', 'data_directory_bytes', 'database_bytes', 'disk_total_bytes', 'disk_used_bytes', 'disk_free_bytes'})}</table><h2>Collection</h2><table>{rows(latest, {'database_bytes'})}</table><h2>Learning</h2><table>{rows(learning)}</table><h2>Estimate accuracy</h2><p>{value(evaluation.get('note'))} Event sample: {value(evaluation.get('event_sample'))}.</p><table class=\"accuracy\"><thead><tr><th>Forecast lead</th><th>Estimate source</th><th>Samples</th><th>Mean absolute error</th><th>Median error</th><th>90th percentile error</th><th>Bias</th></tr></thead><tbody>{''.join(accuracy_rows) or '<tr><td colspan=\"7\">No completed arrival comparisons yet.</td></tr>'}</tbody></table><h2>Collector health</h2><table>{upstream_rows}</table></body></html>"""
 
 
 def evaluate_predictions(session: Session) -> dict[str, object]:

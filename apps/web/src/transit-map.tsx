@@ -18,6 +18,7 @@ export function TransitMap({ routes, shapes, stops, vehicles, activeRouteIds, se
   const vehiclesById = useRef(new globalThis.Map<string, Vehicle>())
   const initialFrameComplete = useRef(false)
   const framedRoute = useRef<string | undefined>(undefined)
+  const framedStop = useRef<string | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
   stopsByIdRef.current = stopsById
   stopHandler.current = onStop
@@ -54,13 +55,18 @@ export function TransitMap({ routes, shapes, stops, vehicles, activeRouteIds, se
       instance.addSource('stops', { type: 'geojson', data: emptyPoints() })
       instance.addLayer({ id: 'stop-halo', type: 'circle', source: 'stops', paint: { 'circle-radius': ['case', ['get', 'selected'], 12, ['interpolate', ['linear'], ['zoom'], 12, 5.5, 16, 7]], 'circle-color': '#fffaf1', 'circle-stroke-width': 1, 'circle-stroke-color': '#4a4037', 'circle-opacity': .98 } })
       instance.addLayer({ id: 'stop-dots', type: 'circle', source: 'stops', paint: { 'circle-radius': ['case', ['get', 'selected'], 6.5, ['interpolate', ['linear'], ['zoom'], 12, 3.2, 16, 4.4]], 'circle-color': ['case', ['get', 'selected'], '#111111', '#f5c242'], 'circle-stroke-width': 1.4, 'circle-stroke-color': '#161415' } })
-      instance.on('mouseenter', 'stops', () => { instance.getCanvas().style.cursor = 'pointer' })
-      instance.on('mouseleave', 'stops', () => { instance.getCanvas().style.cursor = '' })
-      instance.on('click', 'stops', (event) => {
+      instance.addLayer({ id: 'active-stop-pins', type: 'circle', source: 'stops', filter: ['==', ['get', 'active'], true], paint: { 'circle-radius': ['case', ['get', 'selected'], 13, ['interpolate', ['linear'], ['zoom'], 12, 7, 16, 9]], 'circle-color': '#fffdf9', 'circle-stroke-width': 2, 'circle-stroke-color': ['case', ['get', 'selected'], '#1d1917', '#ba0c2f'] } })
+      instance.addLayer({ id: 'active-stop-pin-center', type: 'circle', source: 'stops', filter: ['==', ['get', 'active'], true], paint: { 'circle-radius': ['case', ['get', 'selected'], 6, ['interpolate', ['linear'], ['zoom'], 12, 3.6, 16, 4.6]], 'circle-color': ['case', ['get', 'selected'], '#1d1917', '#ba0c2f'] } })
+      const activateStop = (event: maplibregl.MapLayerMouseEvent) => {
         const id = event.features?.[0]?.properties?.id as string | undefined
         const stop = id ? stopsByIdRef.current.get(id) : undefined
         if (stop) stopHandler.current(stop)
-      })
+      }
+      for (const layerId of ['stop-dots', 'active-stop-pins', 'active-stop-pin-center']) {
+        instance.on('mouseenter', layerId, () => { instance.getCanvas().style.cursor = 'pointer' })
+        instance.on('mouseleave', layerId, () => { instance.getCanvas().style.cursor = '' })
+        instance.on('click', layerId, activateStop)
+      }
       setLoaded(true)
     })
     return () => {
@@ -93,9 +99,9 @@ export function TransitMap({ routes, shapes, stops, vehicles, activeRouteIds, se
     const source = instance.getSource('stops') as maplibregl.GeoJSONSource | undefined
     source?.setData({
       type: 'FeatureCollection',
-      features: stops.filter((stop) => Number.isFinite(stop.latitude) && Number.isFinite(stop.longitude)).map((stop) => ({ type: 'Feature', properties: { id: stop.id, selected: selectedStop === stop.id }, geometry: { type: 'Point', coordinates: [stop.longitude, stop.latitude] } })),
+      features: stops.filter((stop) => Number.isFinite(stop.latitude) && Number.isFinite(stop.longitude)).map((stop) => ({ type: 'Feature', properties: { id: stop.id, selected: selectedStop === stop.id, active: selectedRoute ? stop.routes.includes(selectedRoute) : stop.routes.some((routeId) => activeRouteIds.has(routeId)) }, geometry: { type: 'Point', coordinates: [stop.longitude, stop.latitude] } })),
     })
-  }, [stops, selectedStop, loaded])
+  }, [stops, selectedStop, selectedRoute, activeRouteIds, loaded])
 
   useEffect(() => {
     const instance = map.current
@@ -110,7 +116,7 @@ export function TransitMap({ routes, shapes, stops, vehicles, activeRouteIds, se
         const element = document.createElement('button')
         element.className = 'bus-marker'
         element.ariaLabel = `Bus ${vehicle.vehicle_id || vehicle.id}`
-        element.innerHTML = '<span>▸</span>'
+        element.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 20 13h-5v7H9v-7H4z" /></svg>'
         element.addEventListener('click', () => {
           const currentVehicle = vehiclesById.current.get(vehicle.id)
           if (currentVehicle) vehicleHandler.current(currentVehicle)
@@ -131,7 +137,15 @@ export function TransitMap({ routes, shapes, stops, vehicles, activeRouteIds, se
 
   useEffect(() => {
     const instance = map.current
-    if (!loaded || !instance || !shapes.length) return
+    if (!loaded || !instance) return
+    const stop = selectedStop ? stopsById.get(selectedStop) : undefined
+    if (stop) {
+      if (framedStop.current === selectedStop) return
+      instance.easeTo({ center: [stop.longitude, stop.latitude], zoom: Math.max(16.1, instance.getZoom()), offset: [0, -80], duration: 650 })
+      framedStop.current = selectedStop
+      return
+    }
+    framedStop.current = undefined
     if (selectedRoute) {
       if (framedRoute.current === selectedRoute) return
       const routeShapes = shapes.filter((shape) => shape.routeId === selectedRoute)
@@ -146,7 +160,7 @@ export function TransitMap({ routes, shapes, stops, vehicles, activeRouteIds, se
     if (!everyLiveRouteHasShape) return
     fitToShapes(instance, shapes.filter((shape) => activeRouteIds.has(shape.routeId)))
     initialFrameComplete.current = true
-  }, [activeRouteIds, loaded, selectedRoute, shapes])
+  }, [activeRouteIds, loaded, selectedRoute, selectedStop, shapes])
 
   return <div ref={host} className="transit-map" role="application" aria-label="UGA Campus Transit map" />
 }

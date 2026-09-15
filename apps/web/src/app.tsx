@@ -89,6 +89,7 @@ function RiderApp() {
   const chooseStop = useCallback((stop: Stop) => {
     setSelectedStop(stop)
     setSelectedStopRoute(undefined)
+    setSelectedRoute(undefined)
     setSelectedVehicle(undefined)
     setRecentStopIds((current) => [stop.id, ...current.filter((id) => id !== stop.id)].slice(0, 6))
     setActiveTab('stops')
@@ -166,7 +167,7 @@ function MapPanel({ busCount, selectedRoute, selectedVehicle, nextStopName, onCl
 }
 
 function StopsPanel({ stops, routes, vehicles, selectedStop, selectedStopRoute, routeDetails, arrivals, routeArrivals, loadingArrivals, location, recentStopIds, activeRouteIds, onStop, onCloseStop, onRoute }: { stops: Stop[]; routes: Route[]; vehicles: Vehicle[]; selectedStop?: Stop; selectedStopRoute?: string; routeDetails: Map<string, RouteDetail | undefined>; arrivals: Arrival[]; routeArrivals: Arrival[]; loadingArrivals: boolean; location: LocationState; recentStopIds: string[]; activeRouteIds: Set<string>; onStop: (stop: Stop) => void; onCloseStop: () => void; onRoute: (routeId: string) => void }) {
-  if (selectedStop) return <StopTimeline stop={selectedStop} routes={routes} vehicles={vehicles} selectedRoute={selectedStopRoute} routeDetails={routeDetails} arrivals={arrivals} routeArrivals={routeArrivals} loading={loadingArrivals} location={location.coordinates} activeRouteIds={activeRouteIds} onClose={onCloseStop} onRoute={onRoute} />
+  if (selectedStop) return <StopTimeline stop={selectedStop} routes={routes} vehicles={vehicles} selectedRoute={selectedStopRoute} routeDetails={routeDetails} arrivals={arrivals} routeArrivals={routeArrivals} loading={loadingArrivals} location={location.coordinates} activeRouteIds={activeRouteIds} onClose={onCloseStop} onRoute={onRoute} onStop={onStop} />
   const nearbyStops = location.coordinates ? [...stops].map((stop) => ({ stop, feet: distanceFeet(location.coordinates!, stop) })).sort((a, b) => a.feet - b.feet).slice(0, 8) : []
   const recentStops = recentStopIds.map((id) => stops.find((stop) => stop.id === id)).filter(Boolean) as Stop[]
   return <div className="panel-scroll stops-panel"><p className="eyebrow">STOPS</p><h1>Nearby stops</h1>{!location.coordinates && <div className="location-card"><div><strong>Find stops around you</strong><p>{location.error || 'Use your location to sort stops by walking distance.'}</p></div><button onClick={location.request}>Use location</button></div>}{nearbyStops.map(({ stop, feet }) => <StopPick key={stop.id} stop={stop} feet={feet} routes={routes} onClick={() => onStop(stop)} />)}{recentStops.length > 0 && <><h2 className="section-heading">Recent stops</h2>{recentStops.map((stop) => <StopPick key={stop.id} stop={stop} feet={location.coordinates ? distanceFeet(location.coordinates, stop) : undefined} routes={routes} onClick={() => onStop(stop)} />)}</>}</div>
@@ -177,7 +178,7 @@ function StopPick({ stop, feet, routes, onClick }: { stop: Stop; feet?: number; 
   return <button className="stop-pick" onClick={onClick}><span className="stop-pick-dot" /><span><strong>{stop.name}</strong><small>{routeNames.length ? `Routes ${routeNames.join(', ')}` : 'Campus stop'}</small></span>{feet !== undefined && <b>{formatFeet(feet)}</b>}</button>
 }
 
-function StopTimeline({ stop, routes, vehicles, selectedRoute, routeDetails, arrivals, routeArrivals, loading, location, activeRouteIds, onClose, onRoute }: { stop: Stop; routes: Route[]; vehicles: Vehicle[]; selectedRoute?: string; routeDetails: Map<string, RouteDetail | undefined>; arrivals: Arrival[]; routeArrivals: Arrival[]; loading: boolean; location?: Coordinates; activeRouteIds: Set<string>; onClose: () => void; onRoute: (routeId: string) => void }) {
+function StopTimeline({ stop, routes, vehicles, selectedRoute, routeDetails, arrivals, routeArrivals, loading, location, activeRouteIds, onClose, onRoute, onStop }: { stop: Stop; routes: Route[]; vehicles: Vehicle[]; selectedRoute?: string; routeDetails: Map<string, RouteDetail | undefined>; arrivals: Arrival[]; routeArrivals: Arrival[]; loading: boolean; location?: Coordinates; activeRouteIds: Set<string>; onClose: () => void; onRoute: (routeId: string) => void; onStop: (stop: Stop) => void }) {
   const serviceRoutes = useMemo(() => stop.routes.map((id) => routes.find((route) => route.id === id)).filter((route): route is Route => Boolean(route && activeRouteIds.has(route.id))).map((route) => ({ route, nearestBus: nearestBusFeet(vehicles, route.id, stop) })).sort((a, b) => a.nearestBus - b.nearestBus), [stop, routes, activeRouteIds, vehicles])
   const routeId = selectedRoute && serviceRoutes.some((item) => item.route.id === selectedRoute) ? selectedRoute : undefined
   const route = routes.find((item) => item.id === routeId)
@@ -187,27 +188,27 @@ function StopTimeline({ stop, routes, vehicles, selectedRoute, routeDetails, arr
   const routeVehicles = vehicles.filter((vehicle) => vehicle.route_id === routeId)
   const selectedStopArrivals = arrivals.filter((arrival) => arrival.route_id === routeId)
   const timelineArrivals = routeArrivals.filter((arrival) => arrival.route_id === routeId)
-  return <div className="panel-scroll stop-timeline-panel"><div className="panel-title-row"><div><p className="eyebrow">STOP</p><h1>{stop.name}</h1></div><button className="close-panel" onClick={onClose} aria-label="Back to stops">×</button></div><div className="serving-routes">{serviceRoutes.map(({ route: candidate }) => { const eta = firstArrivalLabel(arrivals.filter((arrival) => arrival.route_id === candidate.id)); return <button key={candidate.id} className={candidate.id === routeId ? 'serving-route is-selected' : 'serving-route'} style={{ '--route-color': candidate.color } as CSSProperties} onClick={() => onRoute(candidate.id)}><i /><span>{candidate.short_name || candidate.name}</span><b>{eta || 'No estimate'}</b></button> })}</div>{loading && <p className="muted">Refreshing live arrivals…</p>}{!loading && !serviceRoutes.length && <p className="empty-state">No buses are currently serving this stop. Try again when a route is live.</p>}{route && timelineStops.length > 0 && <RouteTimeline route={route} stops={timelineStops} allStops={routeStops} selectedStop={stop} vehicles={routeVehicles} arrivals={timelineArrivals.length ? timelineArrivals : selectedStopArrivals} location={location} />}</div>
+  return <div className="panel-scroll stop-timeline-panel"><div className="panel-title-row"><div><p className="eyebrow">STOP</p><h1>{stop.name}</h1></div><button className="close-panel" onClick={onClose} aria-label="Back to stops">×</button></div><div className="serving-routes">{serviceRoutes.map(({ route: candidate }) => { const info = firstArrivalInfo(arrivals.filter((arrival) => arrival.route_id === candidate.id)); return <button key={candidate.id} className={candidate.id === routeId ? 'serving-route is-selected' : 'serving-route'} style={{ '--route-color': candidate.color } as CSSProperties} onClick={() => onRoute(candidate.id)}><i /><span>{candidate.short_name || candidate.name}</span><b>{info?.label || 'No estimate'}</b>{info && <small className="estimate-source">{info.source}</small>}</button> })}</div>{loading && <p className="muted">Refreshing live arrivals…</p>}{!loading && !serviceRoutes.length && <p className="empty-state">No buses are currently serving this stop. Try again when a route is live.</p>}{route && timelineStops.length > 0 && <RouteTimeline route={route} stops={timelineStops} allStops={routeStops} selectedStop={stop} vehicles={routeVehicles} arrivals={timelineArrivals.length ? timelineArrivals : selectedStopArrivals} location={location} onStop={onStop} />}</div>
 }
 
-function RouteTimeline({ route, stops, selectedStop, vehicles, arrivals, location, allStops = stops }: { route: Route; stops: Stop[]; selectedStop?: Stop; vehicles: Vehicle[]; arrivals: Arrival[]; location?: Coordinates; allStops?: Stop[] }) {
+function RouteTimeline({ route, stops, selectedStop, vehicles, arrivals, location, allStops = stops, onStop }: { route: Route; stops: Stop[]; selectedStop?: Stop; vehicles: Vehicle[]; arrivals: Arrival[]; location?: Coordinates; allStops?: Stop[]; onStop?: (stop: Stop) => void }) {
   const firstVisibleIndex = Math.max(0, allStops.findIndex((stop) => stop.id === stops[0]?.id))
   const busPositions = vehicles.map((vehicle) => {
     const routeIndex = vehicle.next_stop_id ? allStops.findIndex((stop) => stop.id === vehicle.next_stop_id) : -1
     return { vehicle, index: routeIndex - firstVisibleIndex }
   }).filter((item) => item.index >= 0 && item.index < stops.length)
   return <section className="route-timeline" style={{ '--route-color': route.color } as CSSProperties}>
-    <div className="timeline-heading"><span>{route.short_name || route.name}</span><small>UGA estimates</small></div>
-    <div className="timeline-track" aria-hidden="true">{busPositions.map(({ vehicle, index }) => <span key={vehicle.id} className="timeline-bus" style={{ '--position': `${timelinePosition(index, stops.length)}%` } as CSSProperties}>▸</span>)}</div>
+    <div className="timeline-heading"><span>{route.short_name || route.name}</span><small>Route stops</small></div>
+    <div className="timeline-track" aria-hidden="true">{busPositions.map(({ vehicle, index }) => <span key={vehicle.id} className="timeline-bus" style={{ '--position': `${timelinePosition(index, stops.length)}%` } as CSSProperties}><BusArrow /></span>)}</div>
     <div className="timeline-stops">{stops.map((routeStop, index) => {
       const isSelected = routeStop.id === selectedStop?.id
-      const arrivalLabels = arrivalLabelsForRoute(arrivals.filter((arrival) => arrival.stop_id === routeStop.id))
-      const time = arrivalLabels[0]
-      return <article className={isSelected ? 'timeline-stop is-selected' : 'timeline-stop'} key={`${routeStop.id}-${index}`}>
+      const arrivalInfos = arrivalInfosForRoute(arrivals.filter((arrival) => arrival.stop_id === routeStop.id))
+      const info = arrivalInfos[0]
+      return <button type="button" className={isSelected ? 'timeline-stop is-selected' : 'timeline-stop'} key={`${routeStop.id}-${index}`} onClick={() => onStop?.({ ...routeStop, routes: [route.id] })}>
         <span className="timeline-dot" />
-        <div><strong>{routeStop.name}</strong><small className="eta">{time || 'Awaiting live timing'}</small>{arrivalLabels.length > 1 && <small className="other-buses">Other buses: {arrivalLabels.slice(1).join(', ')}</small>}</div>
+        <div><strong>{routeStop.name}</strong><small className="eta">{info?.label || 'Awaiting live timing'}</small>{info && <small className="estimate-source">{info.source}</small>}{arrivalInfos.length > 1 && <small className="other-buses">Other buses: {arrivalInfos.slice(1).map((item) => item.label).join(', ')}</small>}</div>
         {location && <b className="stop-distance">{formatFeet(distanceFeet(location, routeStop))}</b>}
-      </article>
+      </button>
     })}</div>
   </section>
 }
@@ -225,7 +226,7 @@ function RouteDetailPanel({ route, detail, selectedVehicle, location, onStop, on
   if (!route || !detail) return <div className="panel-scroll routes-panel"><p className="eyebrow">ROUTE</p><h1>Loading route…</h1></div>
   const nearby = location.coordinates ? detail.stops.map((stop) => ({ stop, feet: distanceFeet(location.coordinates!, stop) })).sort((a, b) => a.feet - b.feet).slice(0, 3) : []
   const nextStop = selectedVehicle?.next_stop_id ? detail.stops.find((stop) => stop.id === selectedVehicle.next_stop_id)?.name : undefined
-  return <div className="panel-scroll route-detail-panel"><div className="panel-title-row"><div><p className="eyebrow">ROUTE</p><h1>{route.name}</h1></div><button className="close-panel" onClick={onBack} aria-label="Back to routes">×</button></div>{selectedVehicle && <p className="vehicle-note">Bus {selectedVehicle.vehicle_id || selectedVehicle.id}{nextStop ? ` · Next: ${nextStop}` : ''}</p>}{location.coordinates ? <section className="route-nearby"><h2 className="section-heading">Nearby stops</h2>{nearby.map(({ stop, feet }) => <button className="stop-pick" key={stop.id} onClick={() => onStop({ ...stop, routes: [route.id] })}><span className="stop-pick-dot" /><span><strong>{stop.name}</strong><small>{route.short_name || route.name}</small></span><b>{formatFeet(feet)}</b></button>)}</section> : <div className="location-card"><div><strong>Nearby stops on this route</strong><p>{location.error || 'Use your location to see the closest stops.'}</p></div><button onClick={location.request}>Use location</button></div>}<RouteTimeline route={route} stops={detail.stops} vehicles={detail.vehicles} arrivals={detail.arrivals || []} location={location.coordinates} /></div>
+  return <div className="panel-scroll route-detail-panel"><div className="panel-title-row"><div><p className="eyebrow">ROUTE</p><h1>{route.name}</h1></div><button className="close-panel" onClick={onBack} aria-label="Back to routes">×</button></div>{selectedVehicle && <p className="vehicle-note">Bus {selectedVehicle.vehicle_id || selectedVehicle.id}{nextStop ? ` · Next: ${nextStop}` : ''}</p>}{location.coordinates ? <section className="route-nearby"><h2 className="section-heading">Nearby stops</h2>{nearby.map(({ stop, feet }) => <button className="stop-pick" key={stop.id} onClick={() => onStop({ ...stop, routes: [route.id] })}><span className="stop-pick-dot" /><span><strong>{stop.name}</strong><small>{route.short_name || route.name}</small></span><b>{formatFeet(feet)}</b></button>)}</section> : <div className="location-card"><div><strong>Nearby stops on this route</strong><p>{location.error || 'Use your location to see the closest stops.'}</p></div><button onClick={location.request}>Use location</button></div>}<RouteTimeline route={route} stops={detail.stops} vehicles={detail.vehicles} arrivals={detail.arrivals || []} location={location.coordinates} onStop={onStop} /></div>
 }
 
 function RouteGroup({ title, routes, selectedRoute, distances, onRoute, inactive = false }: { title: string; routes: Route[]; selectedRoute?: string; distances: Map<string, number>; onRoute: (routeId: string) => void; inactive?: boolean }) {
@@ -330,8 +331,21 @@ function stopIndexForVehicle(vehicle: Vehicle, stops: Stop[]) {
 
 function timelinePosition(index: number, length: number) { return length > 1 ? 4 + (index / (length - 1)) * 92 : 50 }
 function formatFeet(feet: number) { return `${Math.max(0, Math.round(feet / 10) * 10).toLocaleString()} ft` }
-function firstArrivalLabel(arrivals: Arrival[]) { return arrivalLabelsForRoute(arrivals)[0] }
-function arrivalLabelsForRoute(arrivals: Arrival[]) { return arrivals.map((arrival) => minutesUntil(arrival.our_eta || arrival.passio_eta)).filter((label) => label !== 'No estimate') }
+type ArrivalInfo = { label: string; source: string }
+
+function arrivalInfosForRoute(arrivals: Arrival[]): ArrivalInfo[] {
+  return arrivals.map((arrival) => ({ label: minutesUntil(arrival.our_eta || arrival.passio_eta), source: estimateSourceLabel(arrival) })).filter((info) => info.label !== 'No estimate')
+}
+
+function firstArrivalInfo(arrivals: Arrival[]) { return arrivalInfosForRoute(arrivals)[0] }
+
+function estimateSourceLabel(arrival: Arrival) {
+  return arrival.prediction_source === 'uga_estimation' ? 'Lattice learned estimate' : 'UGA live estimate'
+}
+
+function BusArrow() {
+  return <svg className="bus-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 20 13h-5v7H9v-7H4z" /></svg>
+}
 function routeText(route: Route) { return `${route.name} ${route.short_name || ''} ${route.long_name || ''}`.toLowerCase() }
 function readRecentStops() { try { const value: unknown = JSON.parse(localStorage.getItem(RECENT_STOPS_KEY) || '[]'); return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 6) : [] } catch { return [] } }
 
