@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from starlette.requests import Request
+from uga_bus.app import cached_json
 from uga_bus.eta import choose_eta, prediction_metrics
 from uga_bus.gtfs import parse_gtfs_time
 from uga_bus.learning import _valid_segment, service_bucket
@@ -54,6 +56,16 @@ def test_prediction_metrics():
     )
     assert metrics["sample_count"] == 2
     assert metrics["mae_seconds"] == 20
+
+
+def test_cached_json_304_has_no_body():
+    initial = cached_json(Request({"type": "http", "headers": []}), {"ok": True})
+    etag = initial.headers["etag"].encode()
+    cached = cached_json(
+        Request({"type": "http", "headers": [(b"if-none-match", etag)]}), {"ok": True}
+    )
+    assert cached.status_code == 304
+    assert cached.body == b""
 
 
 def test_learning_uses_eastern_operating_time_buckets():

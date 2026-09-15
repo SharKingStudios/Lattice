@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import distinct, func, select, tuple_
 from sqlalchemy.orm import Session
@@ -85,7 +85,7 @@ def fresh(health_name: str) -> bool:
     return age is not None and age <= settings.stale_after_seconds
 
 
-def cached_json(request: Request, value: object, seconds: int = 10) -> JSONResponse:
+def cached_json(request: Request, value: object, seconds: int = 10) -> Response:
     encoded = jsonable_encoder(value)
     body = json.dumps(encoded, separators=(",", ":")).encode()
     etag = f'"{hashlib.sha256(body).hexdigest()[:24]}"'
@@ -94,7 +94,9 @@ def cached_json(request: Request, value: object, seconds: int = 10) -> JSONRespo
         "ETag": etag,
     }
     if request.headers.get("if-none-match") == etag:
-        return JSONResponse(status_code=304, content=None, headers=headers)
+        # HTTP 304 responses must not contain a body. JSONResponse would write
+        # the bytes for `null`, which Uvicorn correctly rejects.
+        return Response(status_code=304, headers=headers)
     return JSONResponse(content=encoded, headers=headers)
 
 
@@ -685,10 +687,9 @@ def evaluate_predictions(session: Session) -> dict[str, object]:
         select(StopEvent)
         .where(StopEvent.confidence >= 0.5, StopEvent.trip_id.is_not(None))
         .order_by(StopEvent.arrival_at.desc())
-        # A diagnostics page should be useful interactively. One hundred recent,
-        # high-confidence arrivals gives each horizon a meaningful sample without
-        # issuing thousands of individual historical lookups on every page visit.
-        .limit(100)
+        # Keep the interactive report lightweight; its accuracy sample updates
+        # continuously as fresh arrival events are collected.
+        .limit(25)
     ).all()
     pairs = {(event.trip_id, event.stop_id) for event in events if event.trip_id and event.stop_id}
     if pairs:
